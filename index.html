@@ -440,21 +440,30 @@ function renderPoster(){
   });
 }
 
-// Sizes rows based on how many dishes are in the box: few dishes (e.g. 2-4
-// entradas) get noticeably bigger text so the box doesn't look empty; many
-// dishes (e.g. 6-9 segundos) shrink to spread evenly and still fit. Every
-// row in a section always ends up the SAME font size — if one dish name is
-// too long to fit, the whole section shrinks together (never just that row),
-// and shorter names simply get a longer dotted leader instead of bigger text.
+// Every dish name/price is rendered at ONE fixed size that matches the
+// "MENÚ EJECUTIVO" column printed on the template — never bigger, never
+// smaller, no matter how many entradas or segundos are typed in. Font size
+// is computed as a fixed fraction of the poster's ACTUAL current width
+// (measured live, not the on-screen width at some earlier moment) so it
+// stays correctly proportioned in every context: normal browsing, a narrow
+// phone screen, and the print/PDF output (whose page width is not the same
+// as the screen width). This ratio was calibrated by measuring the cap
+// height of "LOMO SALTADO" in the template image itself.
+const FONT_TO_POSTER_RATIO = 0.0248;
+const MIN_FONT = 10;
+const MAX_FONT = 60;
+// Safety net only: if a dish name is so long it would spill out of its box
+// at the target size, shrink that whole section together (keeping every
+// row the same size) — but only a little, so it stays close to the Menú
+// Ejecutivo size rather than collapsing back to illegibly small text.
+const MIN_SHRINK_RATIO = 0.75;
+
 function layoutSection(overlay, hasPrice){
   const rows = overlay.querySelectorAll('.erow');
-  const n = rows.length;
-  if(!n) return;
+  if(!rows.length) return;
 
-  const boxH = overlay.clientHeight;
-  const MIN_FONT = 12;
-  const MAX_FONT = 36;
-  let fontPx = (boxH / n) * 0.44;
+  const poster = document.getElementById('poster');
+  let fontPx = poster.clientWidth * FONT_TO_POSTER_RATIO;
   fontPx = Math.min(Math.max(fontPx, MIN_FONT), MAX_FONT);
 
   const setSize = (size) => {
@@ -489,7 +498,7 @@ function layoutSection(overlay, hasPrice){
   });
 
   if(minRatio < 1){
-    minRatio = Math.max(minRatio, 0.4);
+    minRatio = Math.max(minRatio, MIN_SHRINK_RATIO);
     setSize(fontPx * minRatio);
   }
 }
@@ -504,6 +513,13 @@ function relayoutAll(){
 renderPoster();
 window.addEventListener('resize', relayoutAll);
 window.addEventListener('load', relayoutAll);
+// The print/PDF page is not rendered at the same width as the screen (the
+// poster is forced to a fixed 210mm), so font sizes must be recomputed right
+// before printing — otherwise text sized for a phone-width screen prints at
+// the wrong (illegibly small) size on the fixed-width page. 'afterprint'
+// restores the correct on-screen size once printing/PDF export is done.
+window.addEventListener('beforeprint', relayoutAll);
+window.addEventListener('afterprint', relayoutAll);
 </script>
 </body>
 </html>
