@@ -222,9 +222,9 @@
     height:29.44%;
     display:flex;
     flex-direction:column;
-    justify-content:space-evenly;
+    justify-content:flex-start;
     align-items:stretch;
-    padding:0 4%;
+    padding:0 3% 0 1.2%;
     line-height:normal;
   }
   .overlay.segundos{
@@ -449,14 +449,14 @@ function renderPoster(){
 // phone screen, and the print/PDF output (whose page width is not the same
 // as the screen width). This ratio was calibrated by measuring the cap
 // height of "LOMO SALTADO" in the template image itself.
-const FONT_TO_POSTER_RATIO = 0.0248;
+const FONT_TO_POSTER_RATIO = 0.0268;
 const MIN_FONT = 10;
 const MAX_FONT = 60;
 // Safety net only: if a dish name is so long it would spill out of its box
 // at the target size, shrink that whole section together (keeping every
 // row the same size) — but only a little, so it stays close to the Menú
 // Ejecutivo size rather than collapsing back to illegibly small text.
-const MIN_SHRINK_RATIO = 0.75;
+const MIN_SHRINK_RATIO = 0.85;
 
 function layoutSection(overlay, hasPrice){
   const rows = overlay.querySelectorAll('.erow');
@@ -467,6 +467,7 @@ function layoutSection(overlay, hasPrice){
   fontPx = Math.min(Math.max(fontPx, MIN_FONT), MAX_FONT);
 
   const setSize = (size) => {
+    overlay.style.rowGap = (size*0.5).toFixed(1) + 'px';
     rows.forEach(row=>{
       row.querySelector('.star').style.fontSize = (size*0.82).toFixed(1) + 'px';
       row.querySelector('.ename').style.fontSize = size.toFixed(1) + 'px';
@@ -496,6 +497,15 @@ function layoutSection(overlay, hasPrice){
       minRatio = Math.min(minRatio, rowWidth / total);
     }
   });
+
+  // rows now stack from the top at a fixed size instead of stretching to
+  // fill the box, so with many dishes (e.g. 8-9 segundos) they can run past
+  // the bottom of the box — shrink together (same floor) if that happens.
+  const contentH = overlay.scrollHeight;
+  const boxH = overlay.clientHeight;
+  if(contentH > boxH){
+    minRatio = Math.min(minRatio, boxH / contentH);
+  }
 
   if(minRatio < 1){
     minRatio = Math.max(minRatio, MIN_SHRINK_RATIO);
