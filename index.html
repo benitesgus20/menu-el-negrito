@@ -222,7 +222,7 @@
     height:29.44%;
     display:flex;
     flex-direction:column;
-    justify-content:flex-start;
+    justify-content:space-evenly;
     align-items:stretch;
     padding:0 3% 0 1.2%;
     line-height:normal;
@@ -458,16 +458,27 @@ const MAX_FONT = 60;
 // Ejecutivo size rather than collapsing back to illegibly small text.
 const MIN_SHRINK_RATIO = 0.85;
 
+// Rows are spread evenly across the box (CSS justify-content:space-evenly)
+// instead of stacked from the top, so with few dishes they fill the space
+// like the printed columns do. The preferred gap between rows is a fraction
+// of the font size; when many long dishes don't fit at that gap, the gap is
+// squeezed first (down to MIN_GAP_RATIO) — only if that's still not enough
+// does the font itself shrink, since keeping the Menú Ejecutivo size matters
+// more than the row spacing.
+const GAP_RATIO = 0.5;
+const MIN_GAP_RATIO = 0.12;
+
 function layoutSection(overlay, hasPrice){
   const rows = overlay.querySelectorAll('.erow');
-  if(!rows.length) return;
+  const n = rows.length;
+  if(!n) return;
 
   const poster = document.getElementById('poster');
   let fontPx = poster.clientWidth * FONT_TO_POSTER_RATIO;
   fontPx = Math.min(Math.max(fontPx, MIN_FONT), MAX_FONT);
 
-  const setSize = (size) => {
-    overlay.style.rowGap = (size*0.5).toFixed(1) + 'px';
+  const setSize = (size, gapPx) => {
+    overlay.style.rowGap = gapPx.toFixed(1) + 'px';
     rows.forEach(row=>{
       row.querySelector('.star').style.fontSize = (size*0.82).toFixed(1) + 'px';
       row.querySelector('.ename').style.fontSize = size.toFixed(1) + 'px';
@@ -475,11 +486,12 @@ function layoutSection(overlay, hasPrice){
     });
   };
 
-  setSize(fontPx);
+  setSize(fontPx, fontPx*GAP_RATIO);
 
-  // find the single worst-fitting row and shrink ALL rows by that same
-  // ratio, so every dish in the section stays exactly the same size.
-  let minRatio = 1;
+  // 1) horizontal fit: does any single row's star+name(+price) overflow its
+  // own width? Find the worst row and shrink ALL rows by that same ratio,
+  // so every dish in the section stays exactly the same size.
+  let hRatio = 1;
   rows.forEach(row=>{
     const rowWidth = row.clientWidth;
     const starW = row.querySelector('.star').getBoundingClientRect().width;
@@ -494,23 +506,39 @@ function layoutSection(overlay, hasPrice){
       total = starW + nameW + reserve;
     }
     if(total > rowWidth){
-      minRatio = Math.min(minRatio, rowWidth / total);
+      hRatio = Math.min(hRatio, rowWidth / total);
     }
   });
 
-  // rows now stack from the top at a fixed size instead of stretching to
-  // fill the box, so with many dishes (e.g. 8-9 segundos) they can run past
-  // the bottom of the box — shrink together (same floor) if that happens.
-  const contentH = overlay.scrollHeight;
+  // 2) vertical fit: with many dishes (e.g. 8-9 segundos), squeeze the gap
+  // toward MIN_GAP_RATIO before ever touching the font size.
   const boxH = overlay.clientHeight;
-  if(contentH > boxH){
-    minRatio = Math.min(minRatio, boxH / contentH);
+  const rowH = rows[0].getBoundingClientRect().height;
+  const neededAtPreferredGap = n*rowH + (n-1)*(fontPx*GAP_RATIO);
+
+  if(hRatio >= 1 && neededAtPreferredGap <= boxH){
+    // everything already fits at the preferred size and gap — nothing to do,
+    // CSS justify-content:space-evenly spreads the rows across any extra room.
+    return;
   }
 
-  if(minRatio < 1){
-    minRatio = Math.max(minRatio, MIN_SHRINK_RATIO);
-    setSize(fontPx * minRatio);
+  const neededAtMinGap = n*rowH + (n-1)*(fontPx*MIN_GAP_RATIO);
+  const vRatio = neededAtMinGap > boxH ? boxH / neededAtMinGap : 1;
+  const ratio = Math.min(hRatio, vRatio);
+
+  if(ratio < 1){
+    // font (and everything with it) has to shrink to fit
+    fontPx = fontPx * Math.max(ratio, MIN_SHRINK_RATIO);
+    setSize(fontPx, fontPx*MIN_GAP_RATIO);
   }
+
+  // whether or not the font just shrank, tighten the gap to whatever
+  // actually fits the box exactly (never below the minimum, never above the
+  // preferred amount) so rows never overflow the bottom border.
+  const rowH2 = rows[0].getBoundingClientRect().height;
+  const fitGap = n > 1 ? (boxH - n*rowH2) / (n-1) : fontPx*GAP_RATIO;
+  const clampedGap = Math.min(Math.max(fitGap, fontPx*MIN_GAP_RATIO*0.5), fontPx*GAP_RATIO);
+  overlay.style.rowGap = clampedGap.toFixed(1) + 'px';
 }
 
 function relayoutAll(){
