@@ -226,6 +226,7 @@
     align-items:stretch;
     padding:0 3% 0 1.2%;
     line-height:normal;
+    overflow:hidden;
   }
   .overlay.segundos{
     left:29.99%;
@@ -318,6 +319,18 @@
     * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
     @page{size:210mm 230mm;margin:0;}
   }
+
+  /* Same rules as @media print above, but toggled by a JS-added class
+     instead of the media query. The 'beforeprint' event's timing relative to
+     when @media print styles actually take effect is unreliable across
+     browsers (Chrome especially, when printing straight to PDF) — the
+     relayout can run against the OLD on-screen width, producing a font
+     sized for the wrong box and causing the overflow this class avoids by
+     letting JS force the print layout, relayout against it, and only then
+     call window.print(). */
+  html.forcing-print,html.forcing-print body{background:#fff;padding:0;margin:0;display:block;width:210mm;height:229mm;overflow:hidden;}
+  html.forcing-print .page-head,html.forcing-print .hint,html.forcing-print .step-label,html.forcing-print .form-card,html.forcing-print .controls-bar{display:none !important;}
+  html.forcing-print #poster{box-shadow:none;width:210mm;max-width:210mm;margin:0;}
 </style>
 </head>
 <body>
@@ -353,7 +366,7 @@
 </div>
 
 <div class="controls-bar">
-  <button class="export-btn" onclick="window.print()">📄 Exportar a PDF</button>
+  <button class="export-btn" onclick="exportToPDF()">📄 Exportar a PDF</button>
 </div>
 
 <script>
@@ -469,12 +482,6 @@ function renderPoster(){
 const FONT_TO_POSTER_RATIO = 0.0268;
 const MIN_FONT = 10;
 const MAX_FONT = 60;
-// Safety net only: if a section has so many long dishes that even wrapped
-// rows don't fit the box vertically, shrink that whole section together
-// (keeping every row the same size) — but only a little, so it stays close
-// to the Menú Ejecutivo size rather than collapsing back to illegibly small
-// text.
-const MIN_SHRINK_RATIO = 0.85;
 
 // Rows are spread evenly across the box (CSS justify-content:space-evenly)
 // instead of stacked from the top, so with few dishes they fill the space
@@ -548,13 +555,21 @@ function layoutSection(overlay, hasPrice){
 
   let neededAtMinGap = rowsH + (n-1)*(fontPx*MIN_GAP_RATIO);
   if(neededAtMinGap > boxH){
-    // even the wrapped rows don't all fit vertically at minimum gap — shrink
-    // the font (a little) as a last resort, then re-check which rows still
-    // need to wrap at the new, smaller size.
-    const ratio = Math.max(boxH / neededAtMinGap, MIN_SHRINK_RATIO);
-    fontPx = fontPx * ratio;
-    setSize(fontPx, fontPx*MIN_GAP_RATIO);
-    applyWraps();
+    // Even the wrapped rows don't all fit vertically at minimum gap — shrink
+    // the font as a last resort. Shrinking also changes which rows need to
+    // wrap (a smaller font is less likely to overflow its row width) and
+    // changes wrapped-row height non-linearly, so a single-shot ratio isn't
+    // reliable — iterate, re-measuring actual heights each step, down to
+    // MIN_FONT if truly needed (a long list is rare, but must never spill
+    // outside the box into the neighboring columns).
+    for(let i=0; i<60; i++){
+      const needed = sumRowHeights() + (n-1)*(fontPx*MIN_GAP_RATIO);
+      if(needed <= boxH || fontPx <= MIN_FONT) break;
+      const ratio = Math.max(Math.sqrt(boxH / needed), 0.97);
+      fontPx = Math.max(fontPx * ratio, MIN_FONT);
+      setSize(fontPx, fontPx*MIN_GAP_RATIO);
+      applyWraps();
+    }
     rowsH = sumRowHeights();
   }
 
@@ -575,13 +590,40 @@ function relayoutAll(){
 renderPoster();
 window.addEventListener('resize', relayoutAll);
 window.addEventListener('load', relayoutAll);
+
 // The print/PDF page is not rendered at the same width as the screen (the
-// poster is forced to a fixed 210mm), so font sizes must be recomputed right
-// before printing — otherwise text sized for a phone-width screen prints at
-// the wrong (illegibly small) size on the fixed-width page. 'afterprint'
-// restores the correct on-screen size once printing/PDF export is done.
+// poster is forced to a fixed 210mm), so font sizes must be recomputed
+// against that width right before printing — otherwise text sized for the
+// on-screen width prints at the wrong size on the fixed-width page.
+//
+// Relying on the browser's own 'beforeprint' timing to do this is not
+// reliable enough: whether the @media print styles have actually taken
+// effect by the time 'beforeprint' fires (and so whether poster.clientWidth
+// already reflects 210mm) varies by browser, and when it doesn't, the
+// relayout silently runs against the old on-screen width — sizing the text
+// for the wrong box height and overflowing past it in the exported PDF.
+// So the export button forces the print layout itself, in a controlled
+// order, instead of trusting that timing:
+function exportToPDF(){
+  document.documentElement.classList.add('forcing-print');
+  relayoutAll();
+  // Two animation frames guarantee the browser has laid out AND painted the
+  // forced-print styles before printing captures the page — one frame is
+  // sometimes not enough for a layout this size.
+  requestAnimationFrame(()=>{
+    requestAnimationFrame(()=>{
+      window.print();
+    });
+  });
+}
+window.addEventListener('afterprint', ()=>{
+  document.documentElement.classList.remove('forcing-print');
+  relayoutAll();
+});
+// Fallback for the browser's native print dialog (e.g. Ctrl+P) invoked
+// without going through the export button — still recompute against
+// whatever width @media print ends up applying.
 window.addEventListener('beforeprint', relayoutAll);
-window.addEventListener('afterprint', relayoutAll);
 </script>
 </body>
 </html>
