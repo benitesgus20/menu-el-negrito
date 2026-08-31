@@ -265,6 +265,23 @@
     white-space:nowrap;
     flex-shrink:0;
   }
+  /* A dish name too long to fit on one line wraps to a second line — only
+     that row, at the same font size as every other row — instead of the
+     whole section shrinking down to fit it. */
+  .erow.wrap{
+    align-items:center;
+  }
+  .erow.wrap .ename{
+    white-space:normal;
+    flex:1 1 auto;
+    min-width:55%;
+  }
+  .erow.wrap .dots{
+    align-self:center;
+  }
+  .erow.wrap .eprice{
+    align-self:center;
+  }
 
   .controls-bar{
     width:1100px;
@@ -452,10 +469,11 @@ function renderPoster(){
 const FONT_TO_POSTER_RATIO = 0.0268;
 const MIN_FONT = 10;
 const MAX_FONT = 60;
-// Safety net only: if a dish name is so long it would spill out of its box
-// at the target size, shrink that whole section together (keeping every
-// row the same size) — but only a little, so it stays close to the Menú
-// Ejecutivo size rather than collapsing back to illegibly small text.
+// Safety net only: if a section has so many long dishes that even wrapped
+// rows don't fit the box vertically, shrink that whole section together
+// (keeping every row the same size) — but only a little, so it stays close
+// to the Menú Ejecutivo size rather than collapsing back to illegibly small
+// text.
 const MIN_SHRINK_RATIO = 0.85;
 
 // Rows are spread evenly across the box (CSS justify-content:space-evenly)
@@ -480,63 +498,69 @@ function layoutSection(overlay, hasPrice){
   const setSize = (size, gapPx) => {
     overlay.style.rowGap = gapPx.toFixed(1) + 'px';
     rows.forEach(row=>{
+      row.classList.remove('wrap');
       row.querySelector('.star').style.fontSize = (size*0.82).toFixed(1) + 'px';
       row.querySelector('.ename').style.fontSize = size.toFixed(1) + 'px';
       if(hasPrice) row.querySelector('.eprice').style.fontSize = size.toFixed(1) + 'px';
     });
   };
 
+  // A row whose star+name(+price) doesn't fit on one line at the current
+  // size wraps its name to a second line — it, and only it — instead of the
+  // whole section shrinking to squeeze it onto one line.
+  const applyWraps = () => {
+    rows.forEach(row=>{
+      const rowWidth = row.clientWidth;
+      const starW = row.querySelector('.star').getBoundingClientRect().width;
+      const nameW = row.querySelector('.ename').getBoundingClientRect().width;
+      let total, reserve;
+      if(hasPrice){
+        const priceW = row.querySelector('.eprice').getBoundingClientRect().width;
+        reserve = rowWidth * 0.08; // minimum dotted leader + gaps
+        total = starW + nameW + priceW + reserve;
+      } else {
+        reserve = rowWidth * 0.04;
+        total = starW + nameW + reserve;
+      }
+      if(total > rowWidth){
+        row.classList.add('wrap');
+      }
+    });
+  };
+
+  const sumRowHeights = () => Array.from(rows).reduce((s,r)=>s+r.getBoundingClientRect().height, 0);
+
   setSize(fontPx, fontPx*GAP_RATIO);
+  applyWraps();
 
-  // 1) horizontal fit: does any single row's star+name(+price) overflow its
-  // own width? Find the worst row and shrink ALL rows by that same ratio,
-  // so every dish in the section stays exactly the same size.
-  let hRatio = 1;
-  rows.forEach(row=>{
-    const rowWidth = row.clientWidth;
-    const starW = row.querySelector('.star').getBoundingClientRect().width;
-    const nameW = row.querySelector('.ename').getBoundingClientRect().width;
-    let total, reserve;
-    if(hasPrice){
-      const priceW = row.querySelector('.eprice').getBoundingClientRect().width;
-      reserve = rowWidth * 0.08; // minimum dotted leader + gaps
-      total = starW + nameW + priceW + reserve;
-    } else {
-      reserve = rowWidth * 0.04;
-      total = starW + nameW + reserve;
-    }
-    if(total > rowWidth){
-      hRatio = Math.min(hRatio, rowWidth / total);
-    }
-  });
-
-  // 2) vertical fit: with many dishes (e.g. 8-9 segundos), squeeze the gap
-  // toward MIN_GAP_RATIO before ever touching the font size.
+  // vertical fit: a wrapped row is taller, so measure ACTUAL row heights
+  // (not an assumed single-line height) and squeeze the gap toward
+  // MIN_GAP_RATIO before ever touching the font size.
   const boxH = overlay.clientHeight;
-  const rowH = rows[0].getBoundingClientRect().height;
-  const neededAtPreferredGap = n*rowH + (n-1)*(fontPx*GAP_RATIO);
+  let rowsH = sumRowHeights();
+  const neededAtPreferredGap = rowsH + (n-1)*(fontPx*GAP_RATIO);
 
-  if(hRatio >= 1 && neededAtPreferredGap <= boxH){
+  if(neededAtPreferredGap <= boxH){
     // everything already fits at the preferred size and gap — nothing to do,
     // CSS justify-content:space-evenly spreads the rows across any extra room.
     return;
   }
 
-  const neededAtMinGap = n*rowH + (n-1)*(fontPx*MIN_GAP_RATIO);
-  const vRatio = neededAtMinGap > boxH ? boxH / neededAtMinGap : 1;
-  const ratio = Math.min(hRatio, vRatio);
-
-  if(ratio < 1){
-    // font (and everything with it) has to shrink to fit
-    fontPx = fontPx * Math.max(ratio, MIN_SHRINK_RATIO);
+  let neededAtMinGap = rowsH + (n-1)*(fontPx*MIN_GAP_RATIO);
+  if(neededAtMinGap > boxH){
+    // even the wrapped rows don't all fit vertically at minimum gap — shrink
+    // the font (a little) as a last resort, then re-check which rows still
+    // need to wrap at the new, smaller size.
+    const ratio = Math.max(boxH / neededAtMinGap, MIN_SHRINK_RATIO);
+    fontPx = fontPx * ratio;
     setSize(fontPx, fontPx*MIN_GAP_RATIO);
+    applyWraps();
+    rowsH = sumRowHeights();
   }
 
-  // whether or not the font just shrank, tighten the gap to whatever
-  // actually fits the box exactly (never below the minimum, never above the
-  // preferred amount) so rows never overflow the bottom border.
-  const rowH2 = rows[0].getBoundingClientRect().height;
-  const fitGap = n > 1 ? (boxH - n*rowH2) / (n-1) : fontPx*GAP_RATIO;
+  // tighten the gap to whatever actually fits the box exactly (never below
+  // the minimum, never above the preferred amount) so rows never overflow.
+  const fitGap = n > 1 ? Math.max((boxH - rowsH) / (n-1), 0) : fontPx*GAP_RATIO;
   const clampedGap = Math.min(Math.max(fitGap, fontPx*MIN_GAP_RATIO*0.5), fontPx*GAP_RATIO);
   overlay.style.rowGap = clampedGap.toFixed(1) + 'px';
 }
